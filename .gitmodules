@@ -1,0 +1,3 @@
+[submodule "submodules/fmiapi"]
+	path = submodules/fmiapi
+	url = https://github.com/Tumetsu/FMI-weather-downloader.git
