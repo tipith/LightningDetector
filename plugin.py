@@ -4,13 +4,12 @@
 #
 #
 ###
-import xml
 import json
 import threading
 import time
+from .fmiapi import FMIOpenData, GPS 
+from .apikey import APIKEY # put your apikey into apikey.py with variable name APIKEY
 
-from owslib.wfs import WebFeatureService
-from datetime import datetime, timedelta
 from supybot.commands import *
 import supybot.utils as utils
 import supybot.conf as conf
@@ -27,74 +26,6 @@ except ImportError:
     # without the i18n module
     _ = lambda x: x
 
-class BoundingBox(object):
-    def __init__(self, lat, lon, radius_km):
-        self.lat = lat
-        self.lon = lon
-        self.radius = radius_km
-    
-    def __str__(self):
-        # crude approximation which does not factor polar flattening. 1 deg = 110.5 km
-        deg = self.radius / 110.5
-        left   = self.lon - deg
-        right  = self.lon + deg
-        bottom = self.lat - deg
-        top    = self.lat + deg
-        return '%2.4f,%2.4f,%2.4f,%2.4f' % (left,bottom,right,top)
-    
-class FMIOpenData(object):
-    def __init__(self, apikey):
-        self.wfs = WebFeatureService(url='http://data.fmi.fi/fmi-apikey/' + apikey + '/wfs', version='2.0.0')
-        self.alarms = []
-        
-    def printStoredQueries(self, filtertext=None):
-        for storedquery in self.wfs.storedqueries:
-            if filtertext is None or filtertext in storedquery.id:
-                print(storedquery.id)
-                for parameter in storedquery.parameters:
-                    print(' - ' + parameter.name)
-
-    def getLightningStrikes(self, lat, lon, size):
-        params = {'bbox':str(BoundingBox(lat, lon, size)), 'starttime':self._getUTCString(30)}
-        print('Searching lightning strikes with parameters:', params)
-        resp = self.wfs.getfeature(storedQueryID='fmi::observations::lightning::simple', storedQueryParams=params)
-        return resp.read()
-
-    def getWeather(self, place, minutes_to_past):
-        params = {'place':str(place), 'starttime':self._getUTCString(minutes_to_past)}
-        print('Searching weather with parameters:', params)
-        resp = self.wfs.getfeature(storedQueryID='fmi::observations::weather::simple', storedQueryParams=params)
-        return resp.read()
-        
-    def getLatestTemperature(self, place):
-        xmldata = self.getWeather(place, minutes_to_past=10)
-        latest_temp = None
-        root = xml.etree.ElementTree.fromstring(xmldata)
-        print('Number of weather measurements returned:', root.attrib['numberReturned'])
-        for member in root.findall('{http://www.opengis.net/wfs/2.0}member'):
-            elem = member.find('{http://xml.fmi.fi/schema/wfs/2.0}BsWfsElement')
-            time = elem.find('{http://xml.fmi.fi/schema/wfs/2.0}Time')
-            name = elem.find('{http://xml.fmi.fi/schema/wfs/2.0}ParameterName')
-            value = elem.find('{http://xml.fmi.fi/schema/wfs/2.0}ParameterValue')
-            print(time.text, name.text, value.text)
-            if name.text == 't2m':
-                latest_temp = float(value.text)
-        return latest_temp
-
-    def getStrikeCount(self, lat, lon, radius_km):
-        xmldata = self.getLightningStrikes(lat, lon, radius_km)
-        root = xml.etree.ElementTree.fromstring(xmldata)
-        print('Number of lightning strikes returned:', root.attrib['numberReturned'])
-        return int(root.attrib['numberReturned'])
-        
-    def _getUTCString(self, minutes_to_past):
-        utc_now = datetime.utcnow()
-        utc_now = utc_now.replace(second=0, microsecond=0)
-        utc_now = utc_now - timedelta(minutes=minutes_to_past)
-        return utc_now.isoformat()
-        
-
-
 def serialize_alarm(alarm):
     format_ = _('%(user)s %(lat)s %(lon)s %(radius)s')
     return format_ % alarm
@@ -106,7 +37,6 @@ class LightningDetector(callbacks.Plugin):
     def __init__(self, irc):
         self.__parent = super(LightningDetector, self)
         self.__parent.__init__(irc)
-        APIKEY = <FMI OPEN DATA API KEY>
         self.fmi = FMIOpenData(APIKEY)
         self.irc = irc
         self.thread = self.AlarmThread(self.irc, self.fmi)
@@ -132,10 +62,11 @@ class LightningDetector(callbacks.Plugin):
                 alarms = json.loads(conf.supybot.plugins.LightningDetector.get('alarms')())
                 
                 for alarm in alarms:
-                    count = self.fmi.getStrikeCount(alarm['lat'], alarm['lon'], alarm['radius'])
-                    log.info('AlarmThread: found %i strikes for alarm %s' % (count, serialize_alarm(alarm)))
+                    gps_loc = GPS(alarm['lat'], alarm['lon'])
+                    strikes = self.fmi.getStrikes(gps_loc, alarm['radius'])
+                    log.info('AlarmThread: found %i strikes for alarm %s' % (len(strikes), serialize_alarm(alarm)))
  
-                    alert = '%s, %i strikes found in last 30 minutes' % (alarm['user'], count)
+                    alert = '%s, %i strikes found in last 30 minutes' % (alarm['user'], len(strikes))
                     self.irc.queueMsg(ircmsgs.privmsg('#salamatesting', alert))
                     
                 self.stopEvent.wait(600.0)
@@ -153,10 +84,10 @@ class LightningDetector(callbacks.Plugin):
         
         Get the weather for a place in a nordic country.
         """
-        temp = self.fmi.getLatestTemperature(place)
+        weathers = self.fmi.getWeather(place)
         
-        if temp is not None:
-            irc.reply('Latest temperature for ' + place + ' is ' + str(temp))
+        if weathers is not None and len(weathers):
+            irc.reply('Latest temperature for ' + place + ' is ' + str(weathers[-1]['t2m']))
         else:
             irc.error('Temperature not found for', place)
     weather = wrap(weather, ['text'])
