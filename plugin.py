@@ -64,21 +64,21 @@ def bearing_to_str(bearing):
     deg = math.floor(math.degrees(bearing))
 
     if is_between_angle(deg, 0):
-        return 'E'
+        return 'east'
     if is_between_angle(deg, -45):
-        return 'SE'
+        return 'south-east'
     if is_between_angle(deg, -90):
-        return 'S'
+        return 'south'
     if is_between_angle(deg, -135):
-        return 'SW'
+        return 'south-west'
     if is_between_angle(deg, 180):
-        return 'W'
+        return 'west'
     if is_between_angle(deg, 135):
-        return 'NW'
+        return 'north-west'
     if is_between_angle(deg, 90):
-        return 'N'
+        return 'north'
     if is_between_angle(deg, 45):
-        return 'NE'
+        return 'north-east'
     
 def serialize_alarm(alarm):
     format_ = _('%(user)s %(channel)s %(lat)s %(lon)s %(radius)s %(next_alarm)s')
@@ -120,11 +120,9 @@ class LightningDetector(callbacks.Plugin):
                 
                 for alarm in alarms:
                     # check alarms every 20 minutes and have an 3 hour blocking period after an alarm per user
-                    if now > int(alarm['next_alarm']):
+                    if now > int(alarm['next_alarm']) or int(alarm['next_alarm']) == 0:
                         gps_loc = GPS(alarm['lat'], alarm['lon'])
                         strikes = self.fmi.getStrikes(gps_loc, alarm['radius'])
-                        
-                        # todo add cool algorithms detecting the direction etc
                         
                         if len(strikes):
                             log.info('AlarmThread: alerting user %s at %s. Found %i strikes' % (alarm['user'], alarm['channel'], len(strikes)))
@@ -157,8 +155,6 @@ class LightningDetector(callbacks.Plugin):
 
                                 unit_vectors.append((math.cos(bearing), math.sin(bearing)))
                                 
-                                #print('%s %.4f %.4f -> %.4f %.4f: distance %.1f km, direction %.1f' % (strike['time'].strftime("%H:%M"), alarm['lat'], alarm['lon'], strike['gps'].lat, strike['gps'].lon, distance, math.degrees(bearing)))
-                        
                             current_mean /= float(len(strikes))
                             distance_mean /= float(len(strikes))
                             
@@ -166,14 +162,26 @@ class LightningDetector(callbacks.Plugin):
                             vector_mean = [x / len(unit_vectors) for x in vector_mean]
                             bearing_mean = math.atan2(vector_mean[1], vector_mean[0])
                             
-                            alert = '%s, %i strikes during last 30 minutes. %i ground strikes, closest %i km at %s, mean %i km at %s, current: peak %.1f kA, |mean| %.1f kA' % (alarm['user'], len(strikes), ground_strikes, distance_closest, bearing_to_str(bearing_closest), distance_mean, bearing_to_str(bearing_mean), current_strongest, current_mean)
+                            alert = '%s, %i strikes during last 30 minutes. %i ground strikes, closest %i km to %s, \
+                                mean %i km to %s, peak current %.1f kA, |mean| %.1f kA' % \
+                                (alarm['user'], len(strikes), ground_strikes, distance_closest,
+                                bearing_to_str(bearing_closest), distance_mean, bearing_to_str(bearing_mean),
+                                current_strongest, current_mean)
                             self.irc.queueMsg(ircmsgs.privmsg(alarm['channel'], alert))
                         
                             # store the next alarm time, todo add configurable
                             alarm['next_alarm'] = now + 3*3600
                             conf.supybot.plugins.LightningDetector.alarms.setValue(json.dumps(alarms))
+                            
+                        elif int(alarm['next_alarm']) == 0:
+                            # user expects output here even if no strikes are found
+                            self.irc.queueMsg(ircmsgs.privmsg(alarm['channel'], '%s, no strikes are currently found in the vicinity' % (alarm['user']) ))
+                            
+                            # this denotes that next_alarm value is not in its initial state
+                            alarm['next_alarm'] = 1
+                            conf.supybot.plugins.LightningDetector.alarms.setValue(json.dumps(alarms))
                     else:
-                        log.info('AlarmThread: alarm timeout not passed for user %s, seconds until next check %i' % (alarm['user'], int(alarm['next_alarm']) - now))
+                        log.info('AlarmThread: alarm blocking period not passed for user %s, next check in %i s' % (alarm['user'], int(alarm['next_alarm']) - now))
                         
                 self.notifyEvent.wait(20*60.0) # todo add configurable
                 self.notifyEvent.clear()
@@ -261,6 +269,23 @@ class LightningDetector(callbacks.Plugin):
         
         self._storeAlarms(alarms)
         irc.replySuccess()
+    removealarm = wrap(removealarm)
+    
+    def statusalarm(self, irc, msg, args):
+        """takes no arguments
+        
+        Bypass blocking delay for alarm. Returns immediate alarm if strikes are found."""
+        alarms = self._getAlarms()
+        
+        if True not in (alarm['user'] == msg.nick for alarm in alarms):
+            irc.error(_('No alarms are found for you'), Raise=True)
+        
+        for alarm in alarms:
+            if alarm['user'] == msg.nick:
+                alarm['next_alarm'] = 0
+        
+        self._storeAlarms(alarms)
+        self.thread.notify()
     removealarm = wrap(removealarm)
     
     def listalarms(self, irc, msg, args):
