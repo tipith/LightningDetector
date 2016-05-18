@@ -110,7 +110,7 @@ class LightningDetector(callbacks.Plugin):
         if weathers is not None and len(weathers):
             irc.reply('Latest temperature for ' + place + ' is ' + str(weathers[-1]['t2m']))
         else:
-            irc.error('Temperature not found for', place)
+            irc.error('Temperature not found for ' + place)
     weather = wrap(weather, ['text'])
     
     def addalarm(self, irc, msg, args, lat, lon, radius):

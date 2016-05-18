@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding: iso-8859-15 -*-
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 
@@ -36,10 +37,13 @@ class FMIOpenData(object):
         params['request'] = 'getFeature'
         params['storedquery_id'] = query
         data = bytes(urllib.parse.urlencode(params), 'utf8')
-        f = urllib.request.urlopen(self.url, data)
-        data = f.read()
-        #print(data)
-        return ET.fromstring(data)
+        try:
+            f = urllib.request.urlopen(self.url, data)
+            data = f.read()
+            #print(data)
+            return ET.fromstring(data)
+        except urllib.error.HTTPError:
+            return None
     
     def _getUTCString(self, minutes_to_past):
         utc_now = datetime.utcnow()
@@ -50,17 +54,19 @@ class FMIOpenData(object):
     def _getQuery(self, query, params):
         print('Performing query:', query, ':', params)
         root = self._request(query, params)
-        positions = root.find('*//gmlcov:positions', self.ns)
-        datas = root.find('*//gml:doubleOrNilReasonTupleList', self.ns)
         
-        if positions is not None and datas is not None:
-            # split lines first, then whitespaces
-            positions = [line.split() for line in positions.text.split('\n')]
-            datas = [line.split() for line in datas.text.split('\n')]
+        if root is not None:
+            positions = root.find('*//gmlcov:positions', self.ns)
+            datas = root.find('*//gml:doubleOrNilReasonTupleList', self.ns)
             
-            if len(positions) == len(datas):
-                # first filter for empty strings from the list and then join
-                return zip(filter(bool, positions), filter(bool, datas))
+            if positions is not None and datas is not None:
+                # split lines first, then whitespaces
+                positions = [line.split() for line in positions.text.split('\n')]
+                datas = [line.split() for line in datas.text.split('\n')]
+                
+                if len(positions) == len(datas):
+                    # first filter for empty strings from the list and then join
+                    return zip(filter(bool, positions), filter(bool, datas))
             
         return None
 
