@@ -108,7 +108,31 @@ class LightningDetector(callbacks.Plugin):
         weathers = self.fmi.getWeather(place)
         
         if weathers is not None and len(weathers):
-            irc.reply('Latest temperature for ' + place + ' is ' + str(weathers[-1]['t2m']))
+            latest = weathers[-1]
+            
+            reply = "Weather for %s at %s: " % (place.title(), ircutils.bold(latest['time'].strftime("%H:%M")))
+            
+            try:
+                if not math.isnan(latest['t2m']):
+                    reply += 'temperature %s C' % (ircutils.bold('%.1f' % (latest['t2m'])))
+                if not math.isnan(latest['rh']):
+                    reply += ', humidity %s %%' % (ircutils.bold('%.0f' % (latest['rh'])))
+                if not math.isnan(latest['ws_10min']):
+                    reply += ', wind %s m/s' % (ircutils.bold('%.1f' % (latest['ws_10min'])))
+                if not math.isnan(latest['wg_10min']):
+                    reply += ', gusts %s m/s' % (ircutils.bold('%.1f' % (latest['wg_10min'])))
+                if not math.isnan(latest['wd_10min']):
+                    reply += ', direction %s deg' % (ircutils.bold('%.0f' % (latest['wd_10min'])))
+                if not math.isnan(latest['p_sea']):
+                    reply += ', pressure %s hPa' % (ircutils.bold('%.1f' % (latest['p_sea'])))
+                if not math.isnan(latest['r_1h']):
+                    reply += ', rain %s mm/h' % (ircutils.bold('%.1f' % (latest['r_1h'])))
+                if not math.isnan(latest['vis']):
+                    reply += ', visibility %s km' % (ircutils.bold('%.1f' % (latest['vis'] / 1000)))
+            except KeyError:
+                pass
+
+            irc.reply(reply)
         else:
             irc.error('Temperature not found for ' + place)
     weather = wrap(weather, ['text'])
