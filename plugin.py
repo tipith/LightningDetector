@@ -7,6 +7,8 @@
 import json
 import threading
 import time
+import calendar
+
 from .fmiapi import FMIOpenData, GPS 
 from .apikey import APIKEY # put your apikey into apikey.py with variable name APIKEY
 
@@ -27,7 +29,7 @@ except ImportError:
     _ = lambda x: x
 
 def serialize_alarm(alarm):
-    format_ = _('%(user)s %(lat)s %(lon)s %(radius)s')
+    format_ = _('%(user)s %(channel)s %(lat)s %(lon)s %(radius)s %(next_alarm)s')
     return format_ % alarm
         
 class LightningDetector(callbacks.Plugin):
@@ -53,6 +55,8 @@ class LightningDetector(callbacks.Plugin):
             threading.Thread.__init__(self)
             self.stopEvent = threading.Event()
             self.stopEvent.clear()
+            self.notifyEvent = threading.Event()
+            self.notifyEvent.clear()
             self.fmi = fmi
             self.irc = irc
 
@@ -60,24 +64,41 @@ class LightningDetector(callbacks.Plugin):
             log.info('AlarmThread: starting')
             while not self.stopped():
                 alarms = json.loads(conf.supybot.plugins.LightningDetector.get('alarms')())
+                now = calendar.timegm(time.gmtime())
                 
                 for alarm in alarms:
-                    gps_loc = GPS(alarm['lat'], alarm['lon'])
-                    strikes = self.fmi.getStrikes(gps_loc, alarm['radius'])
-                    log.info('AlarmThread: found %i strikes for alarm %s' % (len(strikes), serialize_alarm(alarm)))
- 
-                    alert = '%s, %i strikes found in last 30 minutes' % (alarm['user'], len(strikes))
-                    self.irc.queueMsg(ircmsgs.privmsg('#salamatesting', alert))
-                    
-                self.stopEvent.wait(600.0)
-                
+                    # check alarms every 20 minutes and have an 3 hour blocking period after an alarm per user
+                    if now > int(alarm['next_alarm']):
+                        gps_loc = GPS(alarm['lat'], alarm['lon'])
+                        strikes = self.fmi.getStrikes(gps_loc, alarm['radius'])
+                        
+                        # todo add cool algorithms detecting the direction etc
+                        
+                        if len(strikes):
+                            log.info('AlarmThread: alerting user %s at %s. Found %i strikes' % (alarm['user'], alarm['channel'], len(strikes)))
+                            alert = '%s, %i strikes found in last 30 minutes' % (alarm['user'], len(strikes))
+                            self.irc.queueMsg(ircmsgs.privmsg(alarm['channel'], alert))
+                        
+                            # store the next alarm time, todo add configurable
+                            alarm['next_alarm'] = now + 3*3600
+                            conf.supybot.plugins.LightningDetector.alarms.setValue(json.dumps(alarms))
+                    else:
+                        log.info('AlarmThread: alarm timeout not passed for user %s, seconds until next check %i' % (alarm['user'], int(alarm['next_alarm']) - now))
+                        
+                self.notifyEvent.wait(20*60.0) # todo add configurable
+                self.notifyEvent.clear()
+
             log.info('AlarmThread: stopping')
             
         def stop(self):
             self.stopEvent.set()
+            self.notifyEvent.set()
         
         def stopped(self):
             return self.stopEvent.is_set()
+            
+        def notify(self):
+            return self.notifyEvent.set()
             
     def weather(self, irc, msg, args, place):
         """<place>
@@ -97,15 +118,16 @@ class LightningDetector(callbacks.Plugin):
         
         Add an alarm for your nick."""
         alarms = self._getAlarms()
-
+        
         for alarm in alarms:
             if alarm['user'] == msg.nick:
                 irc.error(_('Alarm already exists for you: lat %s, lon %s' % (alarm['lat'], alarm['lon'])), Raise=True)
-            
-        alarm = {'user': msg.nick, 'lat': lat, 'lon': lon, 'radius': radius}
+        
+        alarm = {'user': msg.nick, 'channel': msg.args[0], 'lat': lat, 'lon': lon, 'radius': radius, 'next_alarm': 0}
         alarms.append(alarm)
         
         self._storeAlarms(alarms)
+        self.thread.notify()
         irc.replySuccess()
     addalarm = wrap(addalarm, ['float', 'float', 'int'])
 

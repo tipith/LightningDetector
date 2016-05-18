@@ -48,67 +48,75 @@ class FMIOpenData(object):
         return utc_now.isoformat()
         
     def _getQuery(self, query, params):
-        print(query, ':', params)
+        print('Performing query:', query, ':', params)
         root = self._request(query, params)
-        positions = root.find('*//gmlcov:positions', self.ns).text
-        datas = root.find('*//gml:doubleOrNilReasonTupleList', self.ns).text
+        positions = root.find('*//gmlcov:positions', self.ns)
+        datas = root.find('*//gml:doubleOrNilReasonTupleList', self.ns)
         
-        # split lines first, then whitespaces
-        positions = [line.split() for line in positions.split('\n')]
-        datas = [line.split() for line in datas.split('\n')]
-        
-        if len(positions) == len(datas):
-            # first filter for empty strings from the list and then join
-            return zip(filter(bool, positions), filter(bool, datas))
+        if positions is not None and datas is not None:
+            # split lines first, then whitespaces
+            positions = [line.split() for line in positions.text.split('\n')]
+            datas = [line.split() for line in datas.text.split('\n')]
+            
+            if len(positions) == len(datas):
+                # first filter for empty strings from the list and then join
+                return zip(filter(bool, positions), filter(bool, datas))
+            
         return None
 
     def getWeather(self, place):
         query = 'fmi::observations::weather::multipointcoverage'
         params = {'place':place, 'starttime':self._getUTCString(20)}
         weathers = []
-
-        for pos, data in self._getQuery(query, params):
-            weather = {'time': datetime.utcfromtimestamp(float(pos[2])), 
-                'gps':   GPS(pos[0],pos[1]), 't2m':      float(data[0]), 
-                'ws_10min': float(data[1]),  'wg_10min': float(data[2]), 
-                'wd_10min': float(data[3]),  'rh':       float(data[4]), 
-                'td':       float(data[5]),  'r_1h':     float(data[6]), 
-                'ri_10min': float(data[7]),  'snow_aws': float(data[8]), 
-                'p_sea':    float(data[9]),  'vis':      float(data[10]), 
-                'n_man':    float(data[11]), 'wawa':     float(data[12])}
-            weathers.append(weather)
+        measurements = self._getQuery(query, params)
+        
+        if measurements is not None:
+            for pos, data in measurements:
+                weather = {'time': datetime.utcfromtimestamp(float(pos[2])), 
+                    'gps':   GPS(pos[0],pos[1]), 't2m':      float(data[0]), 
+                    'ws_10min': float(data[1]),  'wg_10min': float(data[2]), 
+                    'wd_10min': float(data[3]),  'rh':       float(data[4]), 
+                    'td':       float(data[5]),  'r_1h':     float(data[6]), 
+                    'ri_10min': float(data[7]),  'snow_aws': float(data[8]), 
+                    'p_sea':    float(data[9]),  'vis':      float(data[10]), 
+                    'n_man':    float(data[11]), 'wawa':     float(data[12])}
+                weathers.append(weather)
+                
         return weathers
         
     def getStrikes(self, gps, radius_km):
         query = 'fmi::observations::lightning::multipointcoverage'
-        params = {'bbox': str(BoundingBox(gps.lat, gps.lon, radius_km)),
-                  'starttime': self._getUTCString(8*24*60), 
-                  'endtime': self._getUTCString(4*24*60)}
-        #'starttime': '2015-08-07T00:00:00', 'endtime': '2015-08-10T00:00:00'} # will return 16208 strikes, with radius 430
+        params = {'bbox': str(BoundingBox(gps.lat, gps.lon, radius_km)), 'starttime': self._getUTCString(30)}
+        #params = {'bbox': str(BoundingBox(gps.lat, gps.lon, radius_km)), 'starttime': '2015-08-07T00:00:00', 'endtime': '2015-08-10T00:00:00'} # returns thousands
+        #params = {'bbox': str(BoundingBox(gps.lat, gps.lon, radius_km)), 'starttime': '2015-08-08T12:00:00', 'endtime': '2015-08-08T14:00:00'} # returns ~100
         strikes = []
         
-        for pos, data in self._getQuery(query, params):
-            strike = {'time': datetime.utcfromtimestamp(float(pos[2])), 
-                'gps': GPS(pos[0],pos[1]), 'multiplicity': int(float(data[0])),
-                'current': float(data[1]), 'cloud': bool(float(data[2])), 'ellipse': float(data[3])}
-            strikes.append(strike)
+        measurements = self._getQuery(query, params)
+        
+        if measurements is not None:
+            for pos, data in measurements:
+                strike = {'time': datetime.utcfromtimestamp(float(pos[2])), 
+                    'gps': GPS(pos[0],pos[1]), 'multiplicity': int(float(data[0])),
+                    'current': float(data[1]), 'cloud': bool(float(data[2])), 'ellipse': float(data[3])}
+                strikes.append(strike)
+                
         return strikes
         
         
 if __name__ == "__main__":
 
-    from .apikey import APIKEY
+    from apikey import APIKEY
     gps_jkl = GPS(62.2447, 25.7472)
 
     fmi = FMIOpenData(APIKEY)
     
-    if True:
+    if False:
         weathers = fmi.getWeather('jyväskylä')
         for weather in weathers:
             print(weather)
     
     if True:
-        strikes = fmi.getStrikes(gps_jkl, radius_km=30)
+        strikes = fmi.getStrikes(gps_jkl, radius_km=3)
         for strike in strikes:
             print(strike)
         print('Number of lightning strikes returned:', len(strikes))

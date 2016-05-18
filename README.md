@@ -1,16 +1,19 @@
-Detects lightning strikes in based on Finnish Meteorological Institute's open data
+This project is a supybot plugin which detects lightning strikes based on Finnish Meteorological Institute's open weather data.
 
-This project is a supybot plugin which can be placed into supybot's working folder under plugins. After this, the authorized user can load the plugin with command "load LightningDetector". Available commands are the following.
+CLone this plugin into supybot's run directory under plugins. After this, the authorized user can load the plugin with command "load LightningDetector". Available commands are the following.
 
 - **addalarm** _lat lon radius_km_
-  * Adds the alarm for the user. Each user can have only one alarm.
-  * Example: addalarm 62.2321 24.2455 50
+  - Adds an alarm for the user -- each user can have only one alarm.
+  - Once an alarm is set, the plugin will periocally check if any lighting strikes are detected in the vicinity. The user will be alarmed to the channel where the alarm was originally set. The plugin tries not to spam and has a three hour blocking period after user has been alarmed.
+  - Example: addalarm 62.2321 24.2455 50
 - **removealarm**
-  * Removes the alarm for the user
+  - Removes alarm for the user
 - **listalarms**
-  * Lists all alarms for all users
+  - Lists all alarms
+  - Output format is the following: _user channel lat lon radius unix_ts_until_next_alarm_
+  - Example: tipi^ #salamatesting 62.2447 25.7472 50 1463528267
 - **weather** _place_
-  * Returns the latest weather for a city in Finland
+  - Returns the weather for a city in Finland
 
 In addition to the files contained in this project, the user must create a file 'apikey.py' which contains the variable APIKEY in the following format. 
 ```
