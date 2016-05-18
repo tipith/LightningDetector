@@ -235,7 +235,7 @@ class LightningDetector(callbacks.Plugin):
             irc.error('Temperature not found for ' + place)
     weather = wrap(weather, ['text'])
     
-    def addalarm(self, irc, msg, args, lat, lon, radius):
+    def alarmadd(self, irc, msg, args, lat, lon, radius):
         """<lat> <lon> <km>
         
         Add an alarm for your nick."""
@@ -251,9 +251,9 @@ class LightningDetector(callbacks.Plugin):
         self._storeAlarms(alarms)
         self.thread.notify()
         irc.replySuccess()
-    addalarm = wrap(addalarm, ['float', 'float', 'int'])
+    alarmadd = wrap(alarmadd, ['float', 'float', 'int'])
 
-    def removealarm(self, irc, msg, args):
+    def alarmremove(self, irc, msg, args):
         """takes no arguments
         
         Removes alarm for your nick."""
@@ -269,9 +269,9 @@ class LightningDetector(callbacks.Plugin):
         
         self._storeAlarms(alarms)
         irc.replySuccess()
-    removealarm = wrap(removealarm)
+    alarmremove = wrap(alarmremove)
     
-    def statusalarm(self, irc, msg, args):
+    def alarmstatus(self, irc, msg, args):
         """takes no arguments
         
         Bypass blocking delay for alarm. Returns immediate alarm if strikes are found."""
@@ -286,9 +286,9 @@ class LightningDetector(callbacks.Plugin):
         
         self._storeAlarms(alarms)
         self.thread.notify()
-    removealarm = wrap(removealarm)
+    alarmstatus = wrap(alarmstatus)
     
-    def listalarms(self, irc, msg, args):
+    def alarmlist(self, irc, msg, args):
         """takes no arguments
         
         Return a list of all alarms."""
@@ -298,7 +298,7 @@ class LightningDetector(callbacks.Plugin):
             irc.reply('Alarm list is empty')
         else:
             irc.replies([serialize_alarm(x) for x in alarms])
-    listalarms = wrap(listalarms)
+    alarmlist = wrap(alarmlist)
         
     def die(self):
         if self.thread is not None:
