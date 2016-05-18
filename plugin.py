@@ -8,6 +8,7 @@ import json
 import threading
 import time
 import calendar
+import math
 
 from .fmiapi import FMIOpenData, GPS 
 from .apikey import APIKEY # put your apikey into apikey.py with variable name APIKEY
@@ -27,7 +28,58 @@ except ImportError:
     # Placeholder that allows to run the plugin on a bot
     # without the i18n module
     _ = lambda x: x
+    
+def gpsbearing(lat1, lon1, lat2, lon2):
+    return math.atan2(math.cos(lat1)*math.sin(lat2)-math.sin(lat1)*math.cos(lat2)*math.cos(lon2-lon1), math.sin(lon2-lon1)*math.cos(lat2)) 
+    
+def haversine(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great circle distance between two points 
+    on the earth (specified in decimal degrees)
+    """
+    # convert decimal degrees to radians 
+    lon1, lat1, lon2, lat2 = map(math.radians, [lon1, lat1, lon2, lat2])
 
+    # haversine formula 
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a)) 
+    r = 6371 # Radius of earth in kilometers. Use 3956 for miles
+    return c * r
+
+def is_between_angle(deg, ref_angle):      
+    ref_high = ref_angle + 22.5
+    ref_low = ref_angle - 22.5
+    
+    if ref_angle == 180:
+        if math.fabs(deg) > 180 - 22.5:
+            return True
+    elif deg <= ref_high and deg > ref_low:
+        return True
+
+    return False
+        
+def bearing_to_str(bearing):
+    deg = math.floor(math.degrees(bearing))
+
+    if is_between_angle(deg, 0):
+        return 'E'
+    if is_between_angle(deg, -45):
+        return 'SE'
+    if is_between_angle(deg, -90):
+        return 'S'
+    if is_between_angle(deg, -135):
+        return 'SW'
+    if is_between_angle(deg, 180):
+        return 'W'
+    if is_between_angle(deg, 135):
+        return 'NW'
+    if is_between_angle(deg, 90):
+        return 'N'
+    if is_between_angle(deg, 45):
+        return 'NE'
+    
 def serialize_alarm(alarm):
     format_ = _('%(user)s %(channel)s %(lat)s %(lon)s %(radius)s %(next_alarm)s')
     return format_ % alarm
@@ -76,7 +128,45 @@ class LightningDetector(callbacks.Plugin):
                         
                         if len(strikes):
                             log.info('AlarmThread: alerting user %s at %s. Found %i strikes' % (alarm['user'], alarm['channel'], len(strikes)))
-                            alert = '%s, %i strikes found in last 30 minutes' % (alarm['user'], len(strikes))
+                        
+                            distance_mean = 0
+                            distance_closest = 10000000 # some random big value
+                            bearing_mean = 0
+                            bearing_closest = 0
+                            
+                            ground_strikes = 0
+                            current_strongest = 0
+                            current_mean = 0
+                            
+                            unit_vectors = []
+
+                            for strike in strikes:
+                                distance = haversine(alarm['lat'], alarm['lon'], strike['gps'].lat, strike['gps'].lon)
+                                bearing = gpsbearing(alarm['lat'], alarm['lon'], strike['gps'].lat, strike['gps'].lon)
+                                
+                                if distance_closest > distance:
+                                    distance_closest = distance
+                                    bearing_closest = bearing
+                                if math.fabs(current_strongest) < math.fabs(strike['current']):
+                                    current_strongest = strike['current']
+                                if not strike['cloud']:
+                                    ground_strikes += 1
+                                
+                                current_mean += math.fabs(strike['current'])
+                                distance_mean += distance
+
+                                unit_vectors.append((math.cos(bearing), math.sin(bearing)))
+                                
+                                #print('%s %.4f %.4f -> %.4f %.4f: distance %.1f km, direction %.1f' % (strike['time'].strftime("%H:%M"), alarm['lat'], alarm['lon'], strike['gps'].lat, strike['gps'].lon, distance, math.degrees(bearing)))
+                        
+                            current_mean /= float(len(strikes))
+                            distance_mean /= float(len(strikes))
+                            
+                            vector_mean = [sum(i) for i in zip(*unit_vectors)]
+                            vector_mean = [x / len(unit_vectors) for x in vector_mean]
+                            bearing_mean = math.atan2(vector_mean[1], vector_mean[0])
+                            
+                            alert = '%s, %i strikes during last 30 minutes. %i ground strikes, closest %i km at %s, mean %i km at %s, current: peak %.1f kA, |mean| %.1f kA' % (alarm['user'], len(strikes), ground_strikes, distance_closest, bearing_to_str(bearing_closest), distance_mean, bearing_to_str(bearing_mean), current_strongest, current_mean)
                             self.irc.queueMsg(ircmsgs.privmsg(alarm['channel'], alert))
                         
                             # store the next alarm time, todo add configurable
