@@ -1,7 +1,8 @@
 ###
-# Copyright (c) 2016, Timo Pihlström
-# All rights reserved.
+# -*- coding: iso-8859-15 -*-
 #
+# Copyright (c) 2016, Timo PihlstrÃ¶m
+# All rights reserved.
 #
 ###
 
@@ -31,7 +32,7 @@ LightningDetector = conf.registerPlugin('LightningDetector')
 #     registry.Boolean(False, _("""Help for someConfigVariableName.""")))
 
 conf.registerGlobalValue(LightningDetector, 'alarms',
-    registry.String('[]', _("""JSON-formatted relays. Do not edit this
+    registry.String('[]', _("""JSON-formatted alarms. Do not edit this
     configuration variable unless you know what you are doing.""")))
 
 # vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:

@@ -1,9 +1,17 @@
 #!/usr/bin/python
 # -*- coding: iso-8859-15 -*-
-import urllib.request
-import urllib.error
-import xml.etree.ElementTree as ET
+from __future__ import print_function
+from builtins import bytes
+try:
+    from urllib.request import urlopen
+    from urrlib.parse import urlencode
+    from urllib.error import HTTPError
+except ImportError:
+    from urllib import urlencode
+    from urllib2 import urlopen
+    from urllib2 import HTTPError
 from datetime import datetime, timedelta
+import xml.etree.ElementTree as ET
 
 class GPS(object):
     def __init__(self, lat, lon):
@@ -36,13 +44,13 @@ class FMIOpenData(object):
     def _request(self, query, params):
         params['request'] = 'getFeature'
         params['storedquery_id'] = query
-        data = bytes(urllib.parse.urlencode(params), 'utf8')
+        data = bytes(urlencode(params), 'utf8')
         try:
-            f = urllib.request.urlopen(self.url, data)
+            f = urlopen(self.url, data)
             data = f.read()
             #print(data)
             return ET.fromstring(data)
-        except urllib.error.HTTPError:
+        except HTTPError:
             return None
     
     def _getUTCString(self, minutes_to_past):
