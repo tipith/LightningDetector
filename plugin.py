@@ -9,6 +9,8 @@ import threading
 import time
 import calendar
 import math
+import pytz
+import tzlocal
 
 from .fmiapi import FMIOpenData, GPS 
 from .apikey import APIKEY # put your apikey into apikey.py with variable name APIKEY
@@ -28,6 +30,11 @@ except ImportError:
     # Placeholder that allows to run the plugin on a bot
     # without the i18n module
     _ = lambda x: x
+
+def utc_to_local(utc_dt):
+    local_tz = tzlocal.get_localzone()
+    local_dt = utc_dt.replace(tzinfo=pytz.utc).astimezone(local_tz)
+    return local_tz.normalize(local_dt)
     
 def gpsbearing(lat1, lon1, lat2, lon2):
     return math.atan2(math.cos(lat1)*math.sin(lat2)-math.sin(lat1)*math.cos(lat2)*math.cos(lon2-lon1), math.sin(lon2-lon1)*math.cos(lat2)) 
@@ -208,7 +215,8 @@ class LightningDetector(callbacks.Plugin):
         if weathers is not None and len(weathers):
             latest = weathers[-1]
             
-            reply = "Weather for %s at %s: " % (place.title(), ircutils.bold(latest['time'].strftime("%H:%M")))
+            local_time_str = utc_to_local(latest['time']).strftime('%H:%M')
+            reply = "Weather for %s at %s: " % (place.title(), ircutils.bold(local_time_str))
             
             try:
                 if not math.isnan(latest['t2m']):
