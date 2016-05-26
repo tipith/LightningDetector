@@ -11,9 +11,10 @@ import calendar
 import math
 import pytz
 import tzlocal
+import smtplib
 
 from .fmiapi import FMIOpenData, GPS 
-from .apikey import APIKEY # put your apikey into apikey.py with variable name APIKEY
+from .userconf import APIKEY # put your apikey into apikey.py with variable name APIKEY
 
 from supybot.commands import *
 import supybot.utils as utils
@@ -30,6 +31,34 @@ except ImportError:
     # Placeholder that allows to run the plugin on a bot
     # without the i18n module
     _ = lambda x: x
+
+gmail_credentials_found = True
+
+try:
+    from .userconf import GMAIL_USER, GMAIL_PASS
+    log.info('Gmail credentials found')
+except ImportError:
+    gmail_credentials_found = False
+    log.warning('Gmail credentials not found')
+
+def send_email(user, pwd, recipient, subject, body):
+    FROM = user
+    TO = recipient if type(recipient) is list else [recipient]
+    SUBJECT = subject
+    TEXT = body
+
+    message = '\From: %s\nTo: %s\nSubject: %s\n\n%s' % (FROM, ", ".join(TO), SUBJECT, TEXT)
+    
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.ehlo()
+        server.starttls()
+        server.login(user, pwd)
+        server.sendmail(FROM, TO, message)
+        server.close()
+        log.info('sent mail to ' + ','.join(TO))
+    except:
+        log.error('failed to send mail to ' + ','.join(TO))
 
 def utc_to_local(utc_dt):
     local_tz = tzlocal.get_localzone()
@@ -88,7 +117,11 @@ def bearing_to_str(bearing):
         return 'north-east'
     
 def serialize_alarm(alarm):
-    format_ = _('%(user)s %(channel)s %(lat)s %(lon)s %(radius)s %(next_alarm)s')
+    format_ = ''
+    if 'email' in alarm:
+        format_ = _('%(user)s %(channel)s %(lat)s %(lon)s %(radius)s %(next_alarm)s %(email)s')
+    else:
+        format_ = _('%(user)s %(channel)s %(lat)s %(lon)s %(radius)s %(next_alarm)s')
     return format_ % alarm
         
 class LightningDetector(callbacks.Plugin):
@@ -169,13 +202,16 @@ class LightningDetector(callbacks.Plugin):
                             vector_mean = [x / len(unit_vectors) for x in vector_mean]
                             bearing_mean = math.atan2(vector_mean[1], vector_mean[0])
                             
-                            alert = '%s, %i strikes during last 30 minutes. %i ground strikes, closest %i km to %s, \
+                            alert = '%i strikes during last 30 minutes. %i ground strikes, closest %i km to %s, \
                                 mean %i km to %s, peak current %.1f kA, |mean| %.1f kA' % \
-                                (alarm['user'], len(strikes), ground_strikes, distance_closest,
+                                (len(strikes), ground_strikes, distance_closest,
                                 bearing_to_str(bearing_closest), distance_mean, bearing_to_str(bearing_mean),
                                 current_strongest, current_mean)
-                            self.irc.queueMsg(ircmsgs.privmsg(alarm['channel'], alert))
-                        
+                            self.irc.queueMsg(ircmsgs.privmsg(alarm['channel'], alarm['user'] + ', ' + alert))
+                            
+                            if 'email' in alarm and gmail_credentials_found:
+                                send_email(GMAIL_USER, GMAIL_PASS, alarm['email'], alert, 'no body yet')
+
                             # store the next alarm time, todo add configurable
                             alarm['next_alarm'] = now + 3*3600
                             conf.supybot.plugins.LightningDetector.alarms.setValue(json.dumps(alarms))
@@ -307,6 +343,27 @@ class LightningDetector(callbacks.Plugin):
         else:
             irc.replies([serialize_alarm(x) for x in alarms])
     alarmlist = wrap(alarmlist)
+
+    def alarmemail(self, irc, msg, args, email):
+        """[<email>]
+
+        Add email alert for your alarm. User without parameter to remove email."""
+        alarms = self._getAlarms()
+
+        if True not in (alarm['user'] == msg.nick for alarm in alarms):
+            irc.error(_('No alarms are found for you'), Raise=True)
+
+        for alarm in alarms:
+            if alarm['user'] == msg.nick:
+                if email is not None:
+                    alarm['email'] = email
+                else:
+                    alarm.pop('email', None)
+
+        self._storeAlarms(alarms)
+        irc.replySuccess()
+    alarmemail = wrap(alarmemail, [optional('text')])
+
         
     def die(self):
         if self.thread is not None:
